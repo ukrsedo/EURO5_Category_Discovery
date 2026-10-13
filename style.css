@@ -14,3 +14,5 @@ nav button.active{color:var(--brand-blue);border-color:var(--brand-blue)}h2,h3{c
 .category-warning{display:flex;align-items:flex-start;gap:7px;color:#b42318;font-weight:600;font-size:13px;line-height:1.5;margin:5px 0}.warning-flag{flex-shrink:0}
 
 .plan-badge{display:inline-block;padding:5px 9px;border-radius:5px;font-size:12px;font-weight:700;margin:6px 0}.plan-badge-primary{background:#e5f4e9;color:#196536}.plan-badge-reserve{background:#fff0d6;color:#7d5100}
+
+.category-note{display:flex;align-items:flex-start;gap:7px;color:#8a5700;font-size:13px;line-height:1.5;margin:5px 0}
