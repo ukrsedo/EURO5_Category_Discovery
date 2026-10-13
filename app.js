@@ -8,7 +8,7 @@ import {requestAI,categoryInput,lotInput,recommendationBrief} from './ai-client.
 import {BiSession,validatePeriod} from './bi.js';
 import{num,analyze,periodDays}from'./core.js';
 const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),pct=n=>fmt(n*100,1)+'%';let sets=[],selected='',cfg,results=new Map();let renderAI=null;
-const dbp=new Promise((resolve,reject)=>{const q=indexedDB.open('evro5-categories',1);q.onupgradeneeded=()=>q.result.createObjectStore('state');q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error)});async function save(){const db=await dbp;await new Promise((ok,no)=>{const tx=db.transaction('state','readwrite');tx.objectStore('state').put(sets,'sets');tx.oncomplete=ok;tx.onerror=()=>no(tx.error)})}async function load(){const db=await dbp;return new Promise((ok,no)=>{const q=db.transaction('state').objectStore('state').get('sets');q.onsuccess=()=>ok(q.result||[]);q.onerror=()=>no(q.error)})}
+const dbp=new Promise((resolve,reject)=>{const q=indexedDB.open('evro5-categories',1);q.onupgradeneeded=()=>q.result.createObjectStore('state');q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error)});async function save(){const db=await dbp;await new Promise((ok,no)=>{const tx=db.transaction('state','readwrite');tx.objectStore('state').put(sets,'sets');tx.oncomplete=ok;tx.onerror=()=>no(tx.error);tx.onabort=()=>no(tx.error||new Error('Збереження перервано'))})}async function load(){const db=await dbp;return new Promise((ok,no)=>{const q=db.transaction('state').objectStore('state').get('sets');q.onsuccess=()=>ok(q.result||[]);q.onerror=()=>no(q.error)})}
 function formatInput(el){const caret=el.selectionStart,count=caret===null?null:el.value.slice(0,caret).replace(/\s/g,'').length;el.value=groupNumericInput(el.value);if(count!==null){let pos=0,seen=0;while(pos<el.value.length&&seen<count){if(!/\s/.test(el.value[pos]))seen++;pos++}el.setSelectionRange(pos,pos)}}
 for(const id of ['threshold','w1','w2','w3']){const el=$(id);el.inputMode='decimal';formatInput(el);el.addEventListener('input',()=>formatInput(el))}
 function config(){const threshold=num($('threshold').value),weights=['w1','w2','w3'].map(x=>num($(x).value));if(threshold===null||threshold<0||weights.some(x=>x===null||x<0)||Math.abs(weights.reduce((a,b)=>a+b,0)-100)>.001)throw Error('Поріг має бути невід’ємним, а сума ваг — 100%.');return{threshold,weights,exclude:parseCPVExclusions([...document.querySelectorAll('.exclusion-row')].filter(row=>row.querySelector('.exclusion-enabled').checked).map(row=>row.querySelector('.exclusion-prefix').value).concat($('exclude').value).join(','))}}
@@ -49,7 +49,7 @@ fetch(apiURL('/api/ai/status')).then(r=>r.json()).then(data=>{aiReady=data.ready
 
 async function clearCategoryData(){
  if(resetBusy||aiBusy||autoAbort)return;
- const button=$('clearData'),previous=sets;resetBusy=true;button.disabled=true;
+ const button=$('clearData'),previous=sets;resetBusy=true;button.disabled=true;button.textContent='Очищення даних…';$('clearStatus').textContent='Очищаю збережені вибірки та результати…';
  try{
   sets=[];
   try{await save()}catch(e){sets=previous;throw e}
@@ -66,8 +66,8 @@ async function clearCategoryData(){
   $('validation').textContent='';$('validation').className='';
   $('criteriaStatus').textContent='Поріг, ваги та виключення збережено.';
   ids.forEach((id,i)=>$(id).hidden=i!==0);[...$('tabs').children].forEach((b,i)=>b.classList.toggle('active',i===0));
-  refresh();render();$('autoStatus').textContent='Дані та результати очищено. Оберіть область і період та завантажте нову вибірку. Поріг, ваги та виключення збережено.';
- }catch(e){$('autoStatus').textContent='Не вдалося очистити збережені дані: '+e.message}
- finally{resetBusy=false;updateClearButton()}
+  refresh();render();$('clearStatus').textContent='Дані та результати очищено. Область і період скинуто. Поріг, ваги та виключення збережено.';$('autoStatus').textContent='Дані та результати очищено. Оберіть область і період та завантажте нову вибірку. Поріг, ваги та виключення збережено.';
+ }catch(e){$('clearStatus').textContent='Не вдалося очистити збережені дані: '+e.message;$('autoStatus').textContent=$('clearStatus').textContent}
+ finally{resetBusy=false;button.textContent='Очистити дані та почати роботу';updateClearButton()}
 }
 $('clearData').onclick=clearCategoryData;updateClearButton();
