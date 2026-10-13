@@ -17,4 +17,4 @@ nav button.active{color:var(--brand-blue);border-color:var(--brand-blue)}h2,h3{c
 
 .category-note{display:flex;align-items:flex-start;gap:7px;color:#8a5700;font-size:13px;line-height:1.5;margin:5px 0}
 
-.hero-meta #clearData{max-width:290px;text-align:center;line-height:1.4;margin:0}@media(max-width:750px){.hero-meta #clearData{max-width:none;width:100%}}
+.setup-heading{justify-content:flex-start;gap:20px;align-items:center}.setup-heading #clearData{margin:0;line-height:1.4}@media(max-width:750px){.setup-heading{gap:10px}.setup-heading #clearData{width:100%}}
