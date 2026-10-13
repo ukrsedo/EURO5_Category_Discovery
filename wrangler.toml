@@ -1,0 +1,5 @@
+name = "euro5-category-discovery"
+main = "index.js"
+compatibility_date = "2026-10-01"
+
+# Configure AI_API_URL, AI_MODEL and AI_API_KEY (secret) on this Worker.

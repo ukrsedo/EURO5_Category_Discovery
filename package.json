@@ -1,0 +1,8 @@
+{
+  "name": "euro5-category-discovery",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node worker/test.mjs"
+  }
+}
