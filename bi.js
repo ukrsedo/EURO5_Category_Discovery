@@ -16,6 +16,49 @@ export class BiSession{
  this.counter=(await this.rpc(this.doc,'CreateSessionObject',{qProp:{qInfo:{qType:'counter'},qHyperCubeDef:{qDimensions:[],qMeasures:[{qDef:{qDef:'$(vLotsCount)',qLabel:'Лоти'}}],qInitialDataFetch:[{qTop:0,qLeft:0,qWidth:1,qHeight:1}]}}})).qReturn.qHandle;
  }
  async interval(first,last){const values=Array.from({length:last-first+1},(_,i)=>({qIsNumeric:true,qNumber:first+i}));await this.select('Дата',values);const l=(await this.rpc(this.counter,'GetLayout')).qLayout.qHyperCube;const n=l.qDataPages?.[0]?.qMatrix?.[0]?.[0]?.qNum;if(!Number.isFinite(n)||n<0)throw Error('BI не повернув коректну кількість лотів.');return n}
- async download({region,start,end,signal,onProgress,onChunk}){const {first,last}=validatePeriod(start,end);await this.connect();try{const latest=await this.coverage();if(end>latest)throw Error('BI містить оголошення лише до '+latest+'. Оберіть кінцеву дату не пізніше цієї.');await this.init(region);const stack=[[first,last]],seen=new Set();let total=0,part=0;const result=[];while(stack.length){if(signal.aborted)throw Error('Завантаження зупинено. Попередній завершений аналіз збережено.');const [a,b]=stack.shift();onProgress({stage:'Перевіряю розмір частини',loaded:total,part:part+1});const n=await this.interval(a,b);if(n>100000)throw Error('Помилка вибірки: '+n.toLocaleString('uk-UA',{useGrouping:true})+' лотів. Максимум — 100 000. Скоротіть період або оберіть область.');part++;if(!n)continue;const cube=(await this.rpc(this.cube,'GetLayout')).qLayout.qHyperCube;if(cube.qError||cube.qCalcCondMsg)throw Error('BI не дозволив розрахувати частину: '+(cube.qCalcCondMsg||cube.qError.qErrorCode));const {qcx:width,qcy:height}=cube.qSize;if(height!==n)throw Error('Кількість рядків таблиці не збігається з кількістю лотів BI.');const headers=[...cube.qDimensionInfo,...cube.qMeasureInfo].map(x=>x.qFallbackTitle);for(const h of ['Ідентифікатор лота','Класифікація CPV','Поточна сума договорів лота','Кіль-ть унікальних учасників лота'])if(!headers.includes(h))throw Error('BI змінив колонку: '+h);const step=Math.floor(10000/width);for(let top=0;top<height;top+=step){if(signal.aborted)throw Error('Завантаження зупинено.');const count=Math.min(step,height-top),page=await this.rpc(this.cube,'GetHyperCubeData',{qPath:'/qHyperCubeDef',qPages:[{qTop:top,qLeft:0,qWidth:width,qHeight:count}]});const matrix=page.qDataPages?.[0]?.qMatrix;if(!matrix||matrix.length!==count)throw Error('Неповна сторінка BI. Аналіз не запущено.');const rows=matrix.map(cells=>Object.fromEntries(headers.map((h,i)=>[h,cells[i]?.qText==='-'?'':Number.isFinite(cells[i]?.qNum)?cells[i].qNum:cells[i]?.qText||''])));const unique=rows.filter(r=>{const id=r['Ідентифікатор лота'];if(seen.has(id))return false;seen.add(id);return true});for(const r of unique)result.push(r);total+=unique.length;onChunk?.(unique);onProgress({stage:'Завантажую дані',loaded:total,part,partLoaded:top+count,partTotal:height,pending:stack.length})}}return{rows:result,parts:part,months:durationMonths(start,end),latestDate:latest}}finally{this.close()}}
+ async download({region,start,end,signal,onProgress,onChunk,onLargeSelection}){
+  const {first,last}=validatePeriod(start,end);await this.connect();
+  try{
+   const checkAbort=()=>{if(signal.aborted)throw Error('Завантаження зупинено. Попередні дані збережено.')};
+   checkAbort();const latest=await this.coverage();if(end>latest)throw Error('BI містить оголошення лише до '+latest+'. Оберіть кінцеву дату не пізніше цієї.');
+   await this.init(region);const expected=await this.interval(first,last);checkAbort();
+   if(expected>100000){
+    if(!onLargeSelection)throw Error('Велика вибірка потребує підтвердження перед завантаженням.');
+    const proceed=await onLargeSelection({count:expected,region,start,end,signal});checkAbort();
+    if(!proceed)throw Error('Завантаження не розпочато. Змініть область або період. Попередні дані збережено.');
+    if(this.socket?.readyState===3){await this.connect();await this.init(region)}
+   }
+   const stack=[[first,last,expected]],parts=[];let total=0,part=0;
+   while(stack.length){
+    checkAbort();const [a,b,n]=stack.shift();onProgress?.({stage:'Готую частини вибірки',loaded:0,total:expected,part:0,planned:parts.length,pending:stack.length});
+    if(n>100000){
+     if(a===b)throw Error('За одну добу понад 100 000 лотів. Оберіть окрему область. Попередні дані збережено.');
+     const mid=Math.floor((a+b)/2),left=await this.interval(a,mid);checkAbort();const right=await this.interval(mid+1,b);checkAbort();
+     stack.unshift([a,mid,left],[mid+1,b,right]);
+    }else if(n)parts.push([a,b,n]);
+   }
+   if(parts.reduce((sum,p)=>sum+p[2],0)!==expected)throw Error('Кількість лотів BI змінилась під час підготовки. Повторіть завантаження. Попередні дані збережено.');
+   const seen=new Set(),result=[];
+   for(const [a,b,n] of parts){
+    checkAbort();part++;const currentCount=await this.interval(a,b);if(currentCount!==n)throw Error('Дані BI змінились під час завантаження. Повторіть спробу. Попередні дані збережено.');
+    const cube=(await this.rpc(this.cube,'GetLayout')).qLayout.qHyperCube;
+    if(cube.qError||cube.qCalcCondMsg)throw Error('BI не дозволив розрахувати частину: '+(cube.qCalcCondMsg||cube.qError.qErrorCode));
+    const {qcx:width,qcy:height}=cube.qSize;if(height!==n)throw Error('Кількість рядків таблиці не збігається з кількістю лотів BI.');
+    const headers=[...cube.qDimensionInfo,...cube.qMeasureInfo].map(x=>x.qFallbackTitle);
+    for(const h of ['Ідентифікатор лота','Класифікація CPV','Поточна сума договорів лота','Кіль-ть унікальних учасників лота'])if(!headers.includes(h))throw Error('BI змінив колонку: '+h);
+    const step=Math.floor(10000/width);
+    for(let top=0;top<height;top+=step){
+     checkAbort();const count=Math.min(step,height-top),page=await this.rpc(this.cube,'GetHyperCubeData',{qPath:'/qHyperCubeDef',qPages:[{qTop:top,qLeft:0,qWidth:width,qHeight:count}]});checkAbort();
+     const matrix=page.qDataPages?.[0]?.qMatrix;if(!matrix||matrix.length!==count)throw Error('Неповна сторінка BI. Аналіз не запущено.');
+     const rows=matrix.map(cells=>Object.fromEntries(headers.map((h,i)=>[h,cells[i]?.qText==='-'?'':Number.isFinite(cells[i]?.qNum)?cells[i].qNum:cells[i]?.qText||''])));
+     const unique=rows.filter(r=>{const id=r['Ідентифікатор лота'];if(!id)throw Error('BI не повернув ідентифікатор лота.');if(seen.has(id))return false;seen.add(id);return true});
+     for(const r of unique)result.push(r);total+=unique.length;onChunk?.(unique);
+     onProgress?.({stage:'Завантажую дані',loaded:total,total:expected,part,parts:parts.length,partLoaded:top+count,partTotal:height});
+    }
+   }
+   checkAbort();if(result.length!==expected)throw Error('Вибірку отримано не повністю. Аналіз не запущено, попередні дані збережено.');
+   return{rows:result,parts:parts.length,months:durationMonths(start,end),latestDate:latest};
+  }finally{this.close()}
+ }
  close(){this.socket?.close()}
 }
